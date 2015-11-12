@@ -18,5 +18,5 @@
 # You should have received a copy of the GNU General Public License along with
 # pymanip. If not, see <http://www.gnu.org/licenses/>.
 
-import planners
-import utils
+import BaseManipulationPlanner
+import GPGManipulationPlanner

@@ -23,15 +23,15 @@ import random
 import numpy as np
 import time
 import copy
-
-import Heap
-import ObjectPreprocessing as op
-import parabint_utilsformanip as pu
-import Grasp as gr
-from Grasp import (pX, pY, pZ, mX, mY, mZ)
-import Utils
-from Utils import Colorize
 import TOPP
+
+from ..utils import Heap
+from ..utils import ObjectPreprocessing as op
+from ..utils import parabint_utilsformanip as pu
+from ..utils import Grasp as gr
+from ..utils.Grasp import (pX, pY, pZ, mX, mY, mZ)
+from ..utils import Utils
+from ..utils.Utils import Colorize
 
 # cvxopt for object tracking planner
 import cvxopt

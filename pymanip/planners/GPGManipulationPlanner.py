@@ -11,9 +11,9 @@ ion()
 import BaseManipulationPlanner as bmp
 from BaseManipulationPlanner import (FW, BW, REACHED, ADVANCED, TRAPPED,
                                      TRANSIT, TRANSFER, CG, CP, CGCP)
-import Utils
-from Utils import Colorize
-import GraspPlacementGraph as GPG
+from ..utils import Utils
+from ..utils.Utils import Colorize
+from ..utils import GraspPlacementGraph as GPG
 
 _RNG = random.SystemRandom()
 
