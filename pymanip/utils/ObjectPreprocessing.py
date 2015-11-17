@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License along with
 # pymanip. If not, see <http://www.gnu.org/licenses/>.
 
-from openravepy import *
+import openravepy as orpy
 from Grasp import *
 import numpy as np
 import copy
@@ -28,6 +28,10 @@ import Utils
 X = np.array([1., 0., 0.])
 Y = np.array([0., 1., 0.])
 Z = np.array([0., 0., 1.])
+
+import pkg_resources
+gripper_aabb = pkg_resources.resource_string\
+('pymanip', 'utils/gripper_aabb.xml')
 
 ## assume that all parts are boxes
 
@@ -179,11 +183,11 @@ class BoxInfo(object):
         self.objectname = manip_object.GetName()
         self.linkindex = linkindex
 
-        self.env = Environment()
+        self.env = orpy.Environment()
         Clone_Bodies = 1
         self.env.Clone(manip_object.GetEnv(), Clone_Bodies)
 
-        self.collisionchecker = RaveCreateCollisionChecker(self.env, 'ode')
+        self.collisionchecker = orpy.RaveCreateCollisionChecker(self.env, 'ode')
         self.env.SetCollisionChecker(self.collisionchecker)
         
         ## remove all other body
@@ -196,11 +200,11 @@ class BoxInfo(object):
         self.link = self.object.GetLinks()[self.linkindex]
 
         ## load the gripper
-        self.env.Load('../xml/gripper_aabb.xml')
-        self.gripper = self.env.GetKinBody('gripper_aabb')
-
+        self.gripper = self.env.ReadKinBodyXMLData(gripper_aabb)
+        self.env.Add(self.gripper)
+        
         ## create a floor for testing
-        floor = RaveCreateKinBody(self.env, '')
+        floor = orpy.RaveCreateKinBody(self.env, '')
         floor.InitFromBoxes(np.array([[0.0, 0.0, 0.0, 10.0, 10.0, 0.05]]))
         for geom in floor.GetLinks()[0].GetGeometries():
             geom.SetDiffuseColor(np.array([0.6, 0.6, 0.6]))
