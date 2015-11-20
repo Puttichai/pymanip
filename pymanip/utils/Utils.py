@@ -160,7 +160,7 @@ def ComputeTGripper(T_obj, q_grasp, extents, unitscale=False):
     else:
         T3 = ComputeTTrans(pX, delta)
     
-    return np.dot(T_obj, np.dot(T0, np.dot(T1, np.dot(T2, T3))))        
+    return reduce(np.dot, [T_obj, T0, T1, T2, T3])
 
 
 def EnableGripper(robot):
