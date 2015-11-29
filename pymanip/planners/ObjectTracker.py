@@ -26,6 +26,10 @@ import time
 from pymanip.utils import Utils
 from pymanip.utils.Utils import Colorize
 
+# cvxopt for object tracking planner
+import cvxopt
+import cvxopt.solvers
+cvxopt.solvers.options['show_progress'] = False # disable cvxopt output
 
 ############################################################
 #                      Object Tracker
@@ -110,8 +114,8 @@ class ObjectTracker(object):
                     print _funcname + message
                 return [False, None, None]
 
+        # tstartplan = time.time()
         waypoints = [q0] # containing ik solutions at each time step
-        tstartplan = time.time()
         for i, t in enumerate(timestamps[1:]):
             noik = False
             Tgripper = Utils.ComputeTGripper(np.dot(self._transformationslist[i], Trel), 
@@ -139,8 +143,8 @@ class ObjectTracker(object):
                     return [False, None, None]
                                 
             waypoints.append(sol)
-        tendplan = time.time()
-        print Colorize('planning time = {0}'.format(tendplan - tstartplan), 'green')
+        # tendplan = time.time()
+        # print Colorize('planning time = {0}'.format(tendplan - tstartplan), 'green')
 
         return [True, waypoints, timestamps]
 
