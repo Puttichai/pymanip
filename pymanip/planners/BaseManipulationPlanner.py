@@ -27,16 +27,13 @@ import TOPP
 
 from ..utils import Heap
 from ..utils import ObjectPreprocessing as op
-from ..utils import parabint_utilsformanip as pu
 from ..utils import Grasp as gr
 from ..utils.Grasp import (pX, pY, pZ, mX, mY, mZ)
 from ..utils import Utils
 from ..utils.Utils import Colorize
 
-# cvxopt for object tracking planner
-import cvxopt
-import cvxopt.solvers
-cvxopt.solvers.options['show_progress'] = False # disable cvxopt output
+# parabint
+from parabint import utilities as pu
 
 ############################################################
 #                    Global Parameters
@@ -776,7 +773,7 @@ class BaseManipulationPlanner(object):
     # Shortcutting
     #
     def ShortcutManipulationTrajectory(self, trajslist, trajtypeslist, Tobjslist,
-                                       print_=False, plot_=False):        
+                                       print_=False):
         # Reset the scene
         temp = TOPP.Trajectory.PiecewisePolynomialTrajectory.FromString(trajslist[0])
         self.robot.SetActiveDOFValues(temp.Eval(0))
@@ -816,7 +813,7 @@ class BaseManipulationPlanner(object):
                     
                 shortcuttraj = pu.Shortcut\
                 (rampslistnd, self._vmax, self._amax, DELTA, self._shortcutiter, 
-                 PRINT=print_, robot=self.robot, PLOT=plot_)
+                 PRINT=print_, robot=self.robot)
                     
                 newtrajslist.append(str(shortcuttraj)) # store in TOPP format
                 newtrajtypeslist.append(curtrajtype)
@@ -841,7 +838,7 @@ class BaseManipulationPlanner(object):
             
         shortcuttraj = pu.Shortcut\
         (rampslistnd, self._vmax, self._amax, DELTA, self._shortcutiter, 
-         PRINT=print_, robot=self.robot, PLOT=plot_)
+         PRINT=print_, robot=self.robot)
 
         newtrajslist.append(str(shortcuttraj)) # store in TOPP format
         newtrajtypeslist.append(curtrajtype)
