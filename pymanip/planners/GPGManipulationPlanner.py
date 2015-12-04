@@ -183,7 +183,7 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
             
 
     def _Run(self, timeout):
-        if self.hassolution:
+        if self._hassolution:
             print 'The planner has already found a solution.'
             return True
 
