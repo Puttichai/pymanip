@@ -22,6 +22,11 @@
 import numpy as np
 import copy
 
+# For plotting manipulation graphs
+from matplotlib import pyplot as plt
+from pylab import ion
+ion()
+
 # Global parameters
 TRANSIT = 0
 TRANSFER = 1
@@ -249,6 +254,76 @@ class GraspPlacementGraph(object):
                 sols.append(path)
 
         return sols
+
+
+    def Plot(self, fignum, grid=False, verticesoffset=1):
+        offset = verticesoffset # grasp and placement classes start from offset
+        V = [v for v in self.graphdict if v[1] is not None]
+        # Find the numbers of grasp and placement classes
+        vgraspmax = max(V, key=lambda p: p[1])
+        vgraspmin = min(V, key=lambda p: p[1])
+        ngraspclasses = vgraspmax[1] + 1
+        vplacementmax = max(V, key=lambda p: p[0])
+        vplacementmin = min(V, key=lambda p: p[0])
+        nplacementclasses = vplacementmax[0] + 1
+
+        if grid:
+            for i in xrange(nplacementclasses):
+                plt.plot([i + offset, i + offset], 
+                         [offset, offset + ngraspclasses - 1], 'k:')
+            for i in xrange(ngraspclasses):
+                plt.plot([offset, offset + nplacementclasses - 1],
+                         [i + offset, i + offset], 'k:')
+
+        # Now find the extreme vertices of each grasp and placement class
+        extremevertices_placementclass = \
+        np.hstack([np.ones((nplacementclasses, 1))*ngraspclasses,
+                   np.zeros((nplacementclasses, 1))])
+        extremevertices_graspclass = \
+        np.hstack([np.ones((ngraspclasses, 1))*nplacementclasses,
+                   np.zeros((ngraspclasses, 1))])
+
+        for v in V:
+            # Iterate over all vertices
+            if v[1] < extremevertices_placementclass[v[0]][0]:
+                extremevertices_placementclass[v[0], 0] = v[1]
+            if v[1] > extremevertices_placementclass[v[0]][1]:
+                extremevertices_placementclass[v[0], 1] = v[1]
+                
+            if v[0] < extremevertices_graspclass[v[1]][0]:
+                extremevertices_graspclass[v[1], 0] = v[0]
+            if v[0] > extremevertices_graspclass[v[1]][1]:
+                extremevertices_graspclass[v[1], 1] = v[0]
+
+        plt.figure(fignum)
+        plt.hold(True)
+        # Plot transit trajectories
+        for i in xrange(nplacementclasses):
+            mingraspclass = extremevertices_placementclass[i][0]
+            maxgraspclass = extremevertices_placementclass[i][1]
+            if mingraspclass > maxgraspclass:
+                # This placement class does not exist
+                continue
+            plt.plot([i + offset, i + offset], 
+                     [mingraspclass + offset, maxgraspclass + offset], 'g-')
+
+        # Plot transfer trajectories
+        for i in xrange(ngraspclasses):
+            minplacementclass = extremevertices_graspclass[i][0]
+            maxplacementclass = extremevertices_graspclass[i][1]
+            if minplacementclass > maxplacementclass:
+                # This grasp class does not exist
+                continue
+            plt.plot([minplacementclass + offset, maxplacementclass + offset], 
+                     [i + offset, i + offset], 'g-')
+        
+        # Plot vertices
+        X = np.array([v[0] for v in V]) + offset
+        Y = np.array([v[1] for v in V]) + offset
+        plt.plot(X, Y, 'bo')
+        plt.axis([-1 + offset, max(X) + 1, -1 + offset, max(Y) + 1])
+        plt.tight_layout()
+
 
 
 ############################################################
