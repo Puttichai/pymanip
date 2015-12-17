@@ -45,22 +45,30 @@ class ObjectTracker(object):
     manipulation with multiple robots, since we also need motion
     synchronization.
     """
-    def __init__(self, robot, manipulatorname, mobj):
-        self.robot = robot
-        self.manip = self.robot.SetActiveManipulator(manipulatorname)
-        self.active_dofs = self.manip.GetArmIndices()
-        self.robot.SetActiveDOFs(self.active_dofs)
+    def __init__(self, robotslist, manipulatornames, mobj):
+        self.robots = robotslist
+        self.manips = []
+        for robot, manipname in zip(self.robots, manipulatornames):
+            self.manips.append(robot.SetActiveManipulator(manipname))
+            
+        self.active_dofs = self.manips[0].GetArmIndices()
+        
+        for robot in self.robots:
+            robot.SetActiveDOFs(self.active_dofs)
         self.object = mobj
         
-        self._vmax = self.robot.GetDOFVelocityLimits()[0:self.robot.GetActiveDOF()]
-        self._amax = self.robot.GetDOFAccelerationLimits()[0:self.robot.GetActiveDOF()]
+        self._vmax = self.robots[0].GetDOFVelocityLimits()\
+        [0:self.robots[0].GetActiveDOF()]
+        
+        self._amax = self.robots[0].GetDOFAccelerationLimits()\
+        [0:self.robots[0].GetActiveDOF()]
 
         self._print = True
         self._hasquery = False
         self._checkclosestsolution = True
         
         
-    def Track(self, lietraj, transtraj, qgrasp, timestep, q0=None, 
+    def Track(self, lietraj, transtraj, qgrasps, timestep, q0list=None, 
               transformationslist=[]):
         """
         transformationslist provides object's transformations at every
@@ -71,19 +79,24 @@ class ObjectTracker(object):
         Returns
         -------
         plannerstatus : bool
-        waypoints : list
+        waypointslist : list
+            waypointslist is a list of N lists, where N is the number 
+            of robots.
         timestamps : list
         """
         _funcname = '[ObjectTracker::Track] '
 
-        graspedlink = self.object.GetLinks()[qgrasp[0]]
-        extents = graspedlink.GetGeometries()[0].GetBoxExtents()
+        graspedlinkslist = [self.object.GetLinks()[qgrasp[0]] 
+                            for qgrasp in qgrasps]
+        extentslist = [graspedlink.GetGeometries()[0].GetBoxExtents()
+                       for graspedlink in graspedlinkslist]
         
         dur = lietraj.duration
         # Relative transformation between the object's COM and the COM
         # of the grasped link
-        Trel = np.dot(np.linalg.inv(self.object.GetTransform()),
-                      graspedlink.GetTransform())
+        Trelslist = [np.dot(np.linalg.inv(self.object.GetTransform()),
+                            graspedlink.GetTransform())
+                     for graspedlink in graspedlinkslist]
         
         timestamps = np.arange(0, dur, timestep).tolist()
         if (abs(timestamps[-1] - dur) > 1e-8):
@@ -103,50 +116,68 @@ class ObjectTracker(object):
             self._transformationslist = copy.deepcopy(transformationslist)
             
         # Check if the first solution really exists
-        if q0 is None:
-            Tgripper = Utils.ComputeTGripper(np.dot(self._transformationslist[0], Trel), 
-                                             qgrasp, extents)
-            q0 = self.manip.FindIKSolution(Tgripper,
-                                           orpy.IkFilterOptions.CheckEnvCollisions)
-            if q0 is None:
-                if self._print:
-                    message = Colorize('No IK solution at t = 0.', 'red')
-                    print _funcname + message
-                return [False, None, None]
-
-        # tstartplan = time.time()
-        waypoints = [q0] # containing ik solutions at each time step
+        if q0list is None:
+            q0list = []
+            for (i, robot) in self.robots:
+                Tgripper = Utils.ComputeTGripper\
+                (np.dot(self._transformationslist[0], Trelslist[i]), 
+                 qgrasps[i], extentslist[i])
+                
+                q0 = self.manips[i].FindIKSolution\
+                (Tgripper, orpy.IkFilterOptions.CheckEnvCollisions)
+                
+                if q0 is None:
+                    if self._print:
+                        message = Colorize\
+                        ('No IK solution for robot {0} at t = 0.'.format(i), 'red')
+                        print _funcname + message
+                    return [False, None, None]
+                else:
+                    q0list.append(q0)
+        
+        waypointslist = []
+        for q0 in q0list:
+            waypointslist.append([q0])
+            
         for i, t in enumerate(timestamps[1:]):
             noik = False
-            Tgripper = Utils.ComputeTGripper(np.dot(self._transformationslist[i], Trel), 
-                                             qgrasp, extents)
 
-            if self._checkclosestsolution:
-                solutionset = self.manip.FindIKSolutions\
-                (Tgripper, orpy.IkFilterOptions.CheckEnvCollisions)
+            for (j, robot) in enumerate(self.robots):
+                Tgripper = Utils.ComputeTGripper\
+                (np.dot(self._transformationslist[i], Trelslist[j]), 
+                 qgrasps[j], extentslist[j])
 
-                if len(solutionset) < 1:
-                    if self._print:
-                        message = Colorize('No Ik solution at t = {0}.'.format(t), 'red')
-                        print _funcname + message
-                    return [False, None, None]
-                
-                sol = self._FindClosestIKSolution(solutionset, waypoints[i - 1])
-            else:
-                sol = self.manip.FindIKSolution(Tgripper, 
-                                                orpy.IkFilterOptions.CheckEnvCollisions)
-                
-                if sol is None:   
-                    if self._print:
-                        message = Colorize('No Ik solution at t = {0}.'.format(t), 'red')
-                        print _funcname + message
-                    return [False, None, None]
-                                
-            waypoints.append(sol)
-        # tendplan = time.time()
-        # print Colorize('planning time = {0}'.format(tendplan - tstartplan), 'green')
+                if self._checkclosestsolution:
+                    solutionset = self.manips[j].FindIKSolutions\
+                    (Tgripper, orpy.IkFilterOptions.CheckEnvCollisions)
 
-        return [True, waypoints, timestamps]
+                    if len(solutionset) < 1:
+                        if self._print:
+                            message = Colorize\
+                            ('No IK solution for robot {0} at t = {1}'.format(j, t), 
+                             'red')
+                            print _funcname + message
+
+                        return [False, None, None]
+                    
+                    sol = self._FindClosestIKSolution(solutionset, 
+                                                      waypointslist[j][i - 1])
+                else:
+                    sol = self.manips[j].FindIKSolution\
+                    (Tgripper, orpy.IkFilterOptions.CheckEnvCollisions)
+
+                    if sol is None:
+                        if self._print:
+                            message = Colorize\
+                            ('No IK solution for robot {0} at t = {1}'.format(j, t), 
+                             'red')
+                            print _funcname + message
+
+                        return [False, None, None]
+
+                waypointslist[j].append(sol)
+
+        return [True, waypointslist, timestamps]
 
 
     def _FindClosestIKSolution(self, iksolutions, ikref):
