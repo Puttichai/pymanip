@@ -25,6 +25,7 @@ import copy
 # For plotting manipulation graphs
 from matplotlib import pyplot as plt
 from pylab import ion
+from mpl_toolkits.mplot3d import Axes3D
 ion()
 
 # Global parameters
@@ -261,10 +262,8 @@ class GraspPlacementGraph(object):
         V = [v for v in self.graphdict if v[1] is not None]
         # Find the numbers of grasp and placement classes
         vgraspmax = max(V, key=lambda p: p[1])
-        vgraspmin = min(V, key=lambda p: p[1])
         ngraspclasses = vgraspmax[1] + 1
         vplacementmax = max(V, key=lambda p: p[0])
-        vplacementmin = min(V, key=lambda p: p[0])
         nplacementclasses = vplacementmax[0] + 1
 
         if grid:
