@@ -257,8 +257,25 @@ class GraspPlacementGraph(object):
         return sols
 
 
-    def Plot(self, fignum, grid=False, verticesoffset=1):
-        offset = verticesoffset # grasp and placement classes start from offset
+    def Plot(self, fignum, grid=False, verticesoffset=1, includenongp=False):
+        """
+        Plot plots out the Grasp-Placement Graph.
+
+        verticesoffset indicates the starting number of grasp and
+        placement classes.
+        
+        includenongp: if True, Plot will also plot grasp class 0 (no
+        grasp; object in a stable placement) and placement class 0
+        (mid-air grasp).
+        """
+        plt.figure(fignum)
+        plt.hold(True)
+        
+        if includenongp:
+            offset = 1
+        else:
+            offset = verticesoffset # grasp and placement classes start from offset
+        
         V = [v for v in self.graphdict if v[1] is not None]
         # Find the numbers of grasp and placement classes
         vgraspmax = max(V, key=lambda p: p[1])
@@ -266,7 +283,14 @@ class GraspPlacementGraph(object):
         vplacementmax = max(V, key=lambda p: p[0])
         nplacementclasses = vplacementmax[0] + 1
 
-        if grid:
+        if grid and includenongp:
+            for i in xrange(nplacementclasses):
+                plt.plot([i + offset, i + offset], 
+                         [0, offset + ngraspclasses - 1], 'k:')
+            for i in xrange(ngraspclasses):
+                plt.plot([0, offset + nplacementclasses - 1],
+                         [i + offset, i + offset], 'k:')
+        elif grid:
             for i in xrange(nplacementclasses):
                 plt.plot([i + offset, i + offset], 
                          [offset, offset + ngraspclasses - 1], 'k:')
@@ -294,8 +318,6 @@ class GraspPlacementGraph(object):
             if v[0] > extremevertices_graspclass[v[1]][1]:
                 extremevertices_graspclass[v[1], 1] = v[0]
 
-        plt.figure(fignum)
-        plt.hold(True)
         # Plot transit trajectories
         for i in xrange(nplacementclasses):
             mingraspclass = extremevertices_placementclass[i][0]
@@ -303,8 +325,13 @@ class GraspPlacementGraph(object):
             if mingraspclass > maxgraspclass:
                 # This placement class does not exist
                 continue
-            plt.plot([i + offset, i + offset], 
-                     [mingraspclass + offset, maxgraspclass + offset], 'g-')
+
+            if includenongp:
+                plt.plot([i + offset, i + offset], 
+                         [0, maxgraspclass + offset], 'g-')
+            else:
+                plt.plot([i + offset, i + offset], 
+                         [mingraspclass + offset, maxgraspclass + offset], 'g-')
 
         # Plot transfer trajectories
         for i in xrange(ngraspclasses):
@@ -313,16 +340,26 @@ class GraspPlacementGraph(object):
             if minplacementclass > maxplacementclass:
                 # This grasp class does not exist
                 continue
-            plt.plot([minplacementclass + offset, maxplacementclass + offset], 
-                     [i + offset, i + offset], 'g-')
-        
+            
+            if includenongp:
+                plt.plot([0, maxplacementclass + offset], 
+                         [i + offset, i + offset], 'g-')
+            else:
+                plt.plot([minplacementclass + offset, maxplacementclass + offset], 
+                         [i + offset, i + offset], 'g-')
+                
         # Plot vertices
         X = np.array([v[0] for v in V]) + offset
         Y = np.array([v[1] for v in V]) + offset
         plt.plot(X, Y, 'bo')
-        plt.axis([-1 + offset, max(X) + 1, -1 + offset, max(Y) + 1])
-        plt.tight_layout()
+        if includenongp:
+            plt.plot(X, X*0, 'bo')
+            plt.plot(Y*0, Y, 'bo')
+            plt.axis([-1, max(X) + 1, -1, max(Y) + 1])
+        else:
+            plt.axis([-1 + offset, max(X) + 1, -1 + offset, max(Y) + 1])
 
+        plt.tight_layout()
 
 
 ############################################################
