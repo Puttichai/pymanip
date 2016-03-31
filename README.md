@@ -9,6 +9,8 @@ Python library for manipulation planning
 
 - [parabint](https://github.com/Puttichai/parabint)
 
+- [cvxopt](http://cvxopt.org/install/)
+
 
 ## Installation
 
