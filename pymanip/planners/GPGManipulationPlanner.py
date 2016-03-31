@@ -42,16 +42,30 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
         print Colorize('Initializing GPG Manipulation Planner . . .', 'yellow')
         super(GPGManipulationPlanner, self).__init__(robot, manipulatorname, mobj)
 
-        print Colorize('Gathering information of vertices of GPG', 'yellow')
-        self.graphvertices = []
-        for isurface in xrange(len(self.S) - 1):
-            for ibox in xrange(len(self.object.GetLinks())):
-                for appdir in self.boxinfos[ibox].possibleapproachingdir[isurface]:
-                    vnew = (isurface, appdir + 6*ibox)
-                    self.graphvertices.append(vnew)
-
-        print Colorize('Constructing Grasp-Placement Graph', 'yellow')
-        self.GPG = GPG.GraspPlacementGraph(self.graphvertices)
+        graphdict = GPG.LoadGraphDict(self.object.GetKinematicsGeometryHash())
+        if graphdict is None:
+            print Colorize('Gathering information of vertices of GPG', 'yellow')
+            ts_gath = time.time()
+            self.graphvertices = []
+            for isurface in xrange(len(self.objectdb.S) - 1):
+                for ibox in xrange(len(self.object.GetLinks())):
+                    for appdir in self.objectdb.boxinfos[ibox].\
+                        possibleapproachingdir[isurface]:
+                        vnew = (isurface, appdir + 6*ibox)
+                        self.graphvertices.append(vnew)
+            te_gath = time.time()
+            print Colorize('  Created a set of GPG vertices in {0} sec.'.\
+                               format(te_gath - ts_gath), 'yellow')
+            
+            print Colorize('Constructing Grasp-Placement Graph', 'yellow')
+            ts_con = time.time()
+            self.GPG = GPG.GraspPlacementGraph(self.graphvertices)
+            te_con = time.time()
+            print Colorize('  Construction time: {0} sec.'.\
+                               format(te_con - ts_con), 'yellow')
+        else:
+            print Colorize('Graphdict found. Begin loading. . .', 'yellow')
+            self.GPG = GPG.GraspPlacementGraph(graphdict=graphdict)
 
         # Threshold value for removal of infeasible edges
         self._threshold = 15
@@ -70,8 +84,8 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
 
 
     def InitQuery(self, cstart, cgoal):
-        self.vstart = self.Vertex(cstart.Clone(), FW)
-        self.vgoal = self.Vertex(cgoal.Clone(), BW)
+        self.vstart = bmp.Vertex(cstart.Clone(), FW)
+        self.vgoal = bmp.Vertex(cgoal.Clone(), BW)
         # If all paths of length k are infeasible, then try paths of
         # length k + self._increment
         if (self.vstart.id.count(None) == 0) or (self.vgoal.id.count(None) == 0):
@@ -82,7 +96,9 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
             
         self._hasquery = True
         self._hassolution = False
-
+        self._tbredges = [] # store to-be-removed edges (the number of
+                            # infeasible trials exceeding
+                            # self._threshold)
 
     def Plan(self, timeout):
         if not self._hasquery:
@@ -109,8 +125,8 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
             vgoal = self.vgoal.Clone()
             vgoal.level = self._k
             vgoal.id = (vgoal.level, ) + vgoal.id[1::]
-            self.treestart = self.Tree(vstart, FW)
-            self.treeend = self.Tree(vgoal, BW)
+            self.treestart = bmp.Tree(vstart, FW)
+            self.treeend = bmp.Tree(vgoal, BW)
 
             ts_graph = time.time() # start graph processing
             if self._print:
@@ -202,22 +218,22 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
             modified = False # True if some edges are removed
             infeasiblekeys = []
             infeasiblepaths = []
-            for key in self.ED:
-                if self.ED[key] > self._threshold:
-                    l1 = key[0]
-                    v1 = key[1:3]
-                    l2 = key[3]
-                    v2 = key[4:6]
-                    for ipath in xrange(len(self._pathslist)):
-                        path = self._pathslist[ipath]
-                        if (path[l1] == v1) and (path[l2] == v2):
-                            infeasiblepaths.append(ipath)
-                            if key not in infeasiblekeys:
-                                if self._print:
-                                    print Colorize('  Eliminating edge {0}'.format(key),
-                                                   'magenta')
-                                infeasiblekeys.append(key)
-                            modified = True
+            for edge in self._tbredges:
+                l1 = edge[0]
+                v1 = edge[1:3]
+                l2 = edge[3]
+                v2 = edge[4:6]
+                for ipath in xrange(len(self._pathslist)):
+                    path = self._pathslist[ipath]
+                    if (path[l1] == v1) and (path[l2] == v2):
+                        infeasiblepaths.append(ipath)
+                        if edge not in infeasiblekeys:
+                            if self._print:
+                                print Colorize('  Eliminating edge {0}'.format(edge),
+                                               'magenta')
+                            infeasiblekeys.append(edge)
+                        modified = True
+            self._tbredges = [] # reset the list
 
             # If some edges are removed, we also need to remove paths
             # which contain those edges.
@@ -232,7 +248,7 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                     break
                 else:
                     for key in infeasiblekeys:
-                        self.ED.pop(key)
+                        self.ED.pop(key, None)
                     self.QFW = GPG.CreateFWDirectedGraphFromPathsList(self._pathslist)
                     self.QBW = GPG.CreateBWDirectedGraphFromPathsList(self._pathslist)
 
@@ -376,7 +392,10 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                 if sol is None:
                     if self._print:
                         print '    No IK solution'
-                    self.ED[vnear.id + vnext_id] += 1
+                    edge = vnear.id + vnext_id
+                    self.ED[edge] += 1
+                    if self.ED[edge] > self._threshold:
+                        self._tbredges.append(edge)
                     return status
             else:
                 # Usual TRANSIT extension
@@ -386,11 +405,14 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                 if not passed:
                     # Infeasible grasp is probably because it is
                     # kinematically unreachable
-                    self.ED[vnear.id + vnext_id] += 1
+                    edge = vnear.id + vnext_id
+                    self.ED[edge] += 1
+                    if self.ED[edge] > self._threshold:
+                        self._tbredges.append(edge)
                     return status
                 
-            cnew = self.Config(sol, vnear.config.tobj, qgrasp, CGCP, isurface)
-            vnew = self.Vertex(cnew, FW, level=nextlevel)
+            cnew = bmp.Config(sol, vnear.config.tobj, qgrasp, CGCP, isurface)
+            vnew = bmp.Vertex(cnew, FW, level=nextlevel)
             [plannerstatus, trajectorystring] = self._PlanTransitTrajectory\
             (vnear, vnew)
 
@@ -434,7 +456,10 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                 if sol is None:
                     if self._print:
                         print '    No IK solution'
-                    self.ED[vnear.id + vnext_id] += 1
+                    edge = vnear.id + vnext_id
+                    self.ED[edge] += 1
+                    if self.ED[edge] > self._threshold:
+                        self._tbredges.append(edge)
                     return status
             else:
                 # Usual TRANSFER extension
@@ -445,11 +470,14 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                 if not passed:
                     # Infeasible placement is probably because it is
                     # kinematically unreachable
-                    self.ED[vnear.id + vnext_id] += 1
+                    edge = vnear.id + vnext_id
+                    self.ED[edge] += 1
+                    if self.ED[edge] > self._threshold:
+                        self._tbredges.append(edge)
                     return status
                 
-            cnew = self.Config(sol, tobj, vnear.config.qgrasp, CGCP, isurface)
-            vnew = self.Vertex(cnew, FW, level=nextlevel)
+            cnew = bmp.Config(sol, tobj, vnear.config.qgrasp, CGCP, isurface)
+            vnew = bmp.Vertex(cnew, FW, level=nextlevel)
             [plannerstatus, trajectorystring] = self._PlanTransferTrajectory\
             (vnear, vnew)
 
@@ -554,8 +582,8 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                     self.ED[vprev_id + vnear.id] += 1
                     return status
                 
-            cnew = self.Config(sol, vnear.config.tobj, qgrasp, CGCP, isurface)
-            vnew = self.Vertex(cnew, BW, level=prevlevel)
+            cnew = bmp.Config(sol, vnear.config.tobj, qgrasp, CGCP, isurface)
+            vnew = bmp.Vertex(cnew, BW, level=prevlevel)
             [plannerstatus, trajectorystring] = self._PlanTransitTrajectory\
             (vnew, vnear)
 
@@ -613,8 +641,8 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                     self.ED[vprev_id + vnear.id] += 1
                     return status
                 
-            cnew = self.Config(sol, tobj, vnear.config.qgrasp, CGCP, isurface)
-            vnew = self.Vertex(cnew, BW, level=prevlevel)
+            cnew = bmp.Config(sol, tobj, vnear.config.qgrasp, CGCP, isurface)
+            vnew = bmp.Vertex(cnew, BW, level=prevlevel)
             [plannerstatus, trajectorystring] = self._PlanTransferTrajectory\
             (vnew, vnear)
 
@@ -717,8 +745,8 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                     self.ED[vfw.id + vnext_id] += 1
                     continue
 
-                cnew = self.Config(sol, Tobj, qgrasp, CGCP, cbw.isurface)
-                vnew = self.Vertex(cnew, FW, level=vfw.level + 1)
+                cnew = bmp.Config(sol, Tobj, qgrasp, CGCP, cbw.isurface)
+                vnew = bmp.Vertex(cnew, FW, level=vfw.level + 1)
                 [plannerstatus1, trajectorystring1] = self._PlanTransferTrajectory\
                 (vfw, vnew)
                 if (not (plannerstatus1 == 1)):
@@ -755,8 +783,8 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                     self.ED[vfw.id + vnext_id] += 1
                     continue
                 
-                cnew = self.Config(sol, Tobj, qgrasp, CGCP, cfw.isurface)
-                vnew = self.Vertex(cnew, FW, level=vfw.level + 1)
+                cnew = bmp.Config(sol, Tobj, qgrasp, CGCP, cfw.isurface)
+                vnew = bmp.Vertex(cnew, FW, level=vfw.level + 1)
                 [plannerstatus1, trajectorystring1] = self._PlanTransitTrajectory\
                 (vfw, vnew)
                 if not (plannerstatus1 == 1):
@@ -872,8 +900,8 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                     self.ED[vprev_id + vbw.id] += 1
                     continue
 
-                cnew = self.Config(sol, Tobj, qgrasp, CGCP, cfw.isurface)
-                vnew = self.Vertex(cnew, BW, level=vbw.level - 1)
+                cnew = bmp.Config(sol, Tobj, qgrasp, CGCP, cfw.isurface)
+                vnew = bmp.Vertex(cnew, BW, level=vbw.level - 1)
                 [plannerstatus1, trajectorystring1] = self._PlanTransferTrajectory\
                 (vnew, vbw)
                 if not (plannerstatus1 == 1):
@@ -910,8 +938,8 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
                     self.ED[vprev_id + vbw.id] += 1
                     continue
                 
-                cnew = self.Config(sol, Tobj, qgrasp, CGCP, cbw.isurface)
-                vnew = self.Vertex(cnew, BW, level=vbw.level - 1)
+                cnew = bmp.Config(sol, Tobj, qgrasp, CGCP, cbw.isurface)
+                vnew = bmp.Vertex(cnew, BW, level=vbw.level - 1)
                 [plannerstatus1, trajectorystring1] = self._PlanTransitTrajectory\
                 (vnew, vbw)
                 if not (plannerstatus1 == 1):
@@ -953,7 +981,7 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
         passed = False
         ibox = qgrasp[0]
         graspedlink = self.object.GetLinks()[ibox]
-        extents = self.boxinfos[ibox].extents
+        extents = self.objectdb.boxinfos[ibox].extents
         
         for _ in xrange(self._ntrials):
             xobj = _RNG.uniform(self.xobjlim[0], self.xobjlim[1])
@@ -961,11 +989,12 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
             thetaobj = _RNG.uniform(self.thetaobjlim[0], self.thetaobjlim[1])
 
             qobj = [xobj, yobj, thetaobj, isurface]
-            Tobj = Utils.ComputeTObject(qobj, self.S, self.zoffset)
+            Tobj = Utils.ComputeTObject(qobj, self.objectdb.S, self.zoffset)
             
             if False:
                 # TODO: add external implementation of placement checking
-                if not self.CheckPlacement(self.object, Tobj, isurface, self.S):
+                if not self.CheckPlacement(self.object, Tobj, isurface, 
+                                           self.objectdb.S):
                     continue
              
             self.object.SetTransform(Tobj)
@@ -1010,7 +1039,7 @@ class GPGManipulationPlanner(bmp.BaseManipulationPlanner):
         passed = False
         ibox = int(approachingdir)/6
         realapproachingdir = np.mod(approachingdir, 6)
-        boxinfo = self.boxinfos[ibox]
+        boxinfo = self.objectdb.boxinfos[ibox]
         graspedlink = self.object.GetLinks()[ibox]
         
         self.object.SetTransform(Tobj)

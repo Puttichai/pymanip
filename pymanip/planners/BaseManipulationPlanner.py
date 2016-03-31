@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2015 Puttichai Lertkultanon <L.Puttichai@gmail.com>
+# Copyright (C) 2015 -- 2016 Puttichai Lertkultanon <L.Puttichai@gmail.com>
 #
 # This file is part of pymanip.
 #
@@ -27,7 +27,7 @@ import TOPP
 
 from ..utils import Heap
 from ..utils import ObjectPreprocessing as op
-from ..utils import Grasp as gr
+from ..utils import ObjectDatabase as od
 from ..utils.Grasp import (pX, pY, pZ, mX, mY, mZ)
 from ..utils import Utils
 from ..utils.Utils import Colorize
@@ -67,6 +67,197 @@ OPENRAVEPLANNERNAME = 'birrt'
 
 
 ############################################################
+#                         Config
+############################################################
+class Config(object):
+    """
+    Class Config
+
+    Parameters
+    ----------
+    qrobot : n-vector
+        A robot configuration (excluding the gripper).
+    tobj : 4x4 transformation matrix
+        A transformation matrix of the movable object at the current 
+        configuration.
+    qgrasp : list
+        qgrasp must be in the format [ibox, approachingdir, slidingdir, delta].
+        qgrasp must be None if the current configtype is CP.
+        ibox : an index of the box being grasped (a link index).
+        approachingdir : pX, pY, pZ, mX, mY, or mZ
+        slidingdir : pX, pY, or, pZ
+        delta : a position of the gripper along the sliding direction.
+    configtype : CP, CG, or CGCP
+        A type of this composite configuration.
+    isurface : int
+        An index of the contact surface.
+        If isurface is unknown, we need to create a Config via 
+        MRRTPlanner.CreateConfig
+        in order to specify isurface automatically.
+    """
+
+    def __init__(self, qrobot, tobj, qgrasp, configtype, isurface):
+
+        self.qrobot = qrobot
+        self.tobj = tobj
+        self.qgrasp = qgrasp
+        self.type = configtype
+        self.isurface = isurface
+
+        if (configtype == CP):
+            self.approachingdir = None
+        else:
+            self.approachingdir = qgrasp[1]
+
+
+    def __str__(self):
+        string = "configtype = {0}\n".format(DICTIONARY[WORDS[self.type]])
+        string += "qrobot = {0}\n".format(self.qrobot)
+        string += "tobj = {0}\n".format(self.tobj)
+        string += "qgrasp = {0}".format(self.qgrasp)
+        return string
+
+
+    def Clone(self):
+        qrobot = copy.copy(self.qrobot)
+        tobj = copy.copy(self.tobj)
+        qgrasp = copy.copy(self.qgrasp)
+        configtype = copy.copy(self.type)
+        isurface = copy.copy(self.isurface)
+        return  Config(qrobot, tobj, qgrasp, configtype, isurface)
+
+
+############################################################
+#                         Vertex
+############################################################
+class Vertex(object):
+    """
+    Class Vertex
+
+    Parameters
+    ----------
+    config : Config
+    parentindex : int
+        Index of its parent
+    vertextype : FW or BW
+        Indicates in which tree the vertex is
+    level : int
+        The number of levels from the root.
+        The root is at level 0.
+    trajtype : TRANSIT or TRANSFER
+    index : int
+        The index of this vertiex in tree.verticeslist.
+        This number will be assigned when added to a tree.
+    id : tuple
+        A vertex id is (pathlevel, isurface, approachingdir).
+        id has to contain pathlevel since now the graph will possibly 
+        have cycles.
+    """    
+
+    def __init__(self, config, vertextype=FW, trajtype=None, level=0):
+        self.config = config
+        self.parentindex = None
+        self.vertextype = vertextype
+        self.trajectory = None
+        self.level = level
+        self.trajtype = trajtype
+        self.index = 0 ## to be assigned when added to the tree
+        self.id = (self.level, self.config.isurface, self.config.approachingdir)
+
+
+    def __str__(self):
+        string = "vindex = {0}\n".format(self.index)
+        string += str(self.config)
+        return string
+
+
+    def Clone(self):
+        vnew = Vertex(self.config.Clone())
+
+        vnew.id = copy.deepcopy(self.id)
+
+        ## float and string are safe
+        vnew.parentindex = self.parentindex
+        vnew.vertextype = self.vertextype
+        vnew.trajectory = self.trajectory
+        vnew.level = self.level
+        vnew.trajtype = self.trajtype
+        vnew.index = self.index
+
+        return vnew
+
+
+############################################################
+#                         Tree
+############################################################
+class Tree(object):
+
+    def __init__(self, vroot, treetype=FW):
+        self.verticeslist = []
+        self.verticeslist.append(vroot)
+        self.treetype = treetype
+        self.length = 1
+
+
+    def __len__(self):
+        return len(self.verticeslist)
+
+
+    def __getitem__(self, index):
+        return self.verticeslist[index]
+
+
+    def Clone(self):
+        tnew = Tree(None, self.treetype)
+        tnew.verticeslist = [v.Clone() for v in self.verticeslist]
+        tnew.length = self.length
+        return tnew
+
+
+    def AddVertex(self, parentindex, vnew, trajectory, trajtype):
+        parent = self.verticeslist[parentindex]
+        vnew.parentindex = parentindex
+        # vnew.level = parent.level + 1
+        vnew.trajectory = trajectory
+        vnew.trajtype = trajtype
+        vnew.index = self.length
+        self.verticeslist.append(vnew)
+        self.length += 1
+
+
+    def GenerateManipulationTrajectory(self, vindex=-1):
+        trajslist = []
+        trajtypeslist = []
+        vertex = self.verticeslist[vindex]
+        while (vertex.parentindex != None):
+            parent = self.verticeslist[vertex.parentindex]
+            trajslist.append(vertex.trajectory)
+            trajtypeslist.append(vertex.trajtype)
+            vertex = parent
+
+        if (self.treetype == FW):
+            trajslist = trajslist[::-1]
+            trajtypeslist = trajtypeslist[::-1]
+
+        return [trajslist, trajtypeslist]
+
+
+    def GenerateObjectTransformationsList(self, vindex=-1):
+        tobjlist = []
+        vertex = self.verticeslist[vindex]
+        while (vertex.parentindex != None):
+            parent = self.verticeslist[vertex.parentindex]
+            tobjlist.append(vertex.config.tobj)
+            vertex = parent
+        tobjlist.append(self.verticeslist[0].config.tobj)
+
+        if (self.treetype == FW):
+            tobjlist = tobjlist[::-1]
+
+        return tobjlist
+
+
+############################################################
 #                Base Manipulation Planner
 ############################################################
 class BaseManipulationPlanner(object):
@@ -81,201 +272,7 @@ class BaseManipulationPlanner(object):
     - PlayTransitTrajectory
     - PlayTransferTrajectory
     """
-    #
-    # Config
-    #
-    class Config(object):
-        """
-        Class Config
-
-        Parameters
-        ----------
-        qrobot : n-vector
-            A robot configuration (excluding the gripper).
-        tobj : 4x4 transformation matrix
-            A transformation matrix of the movable object at the current 
-            configuration.
-        qgrasp : list
-            qgrasp must be in the format [ibox, approachingdir, slidingdir, delta].
-            qgrasp must be None if the current configtype is CP.
-            ibox : an index of the box being grasped (a link index).
-            approachingdir : pX, pY, pZ, mX, mY, or mZ
-            slidingdir : pX, pY, or, pZ
-            delta : a position of the gripper along the sliding direction.
-        configtype : CP, CG, or CGCP
-            A type of this composite configuration.
-        isurface : int
-            An index of the contact surface.
-            If isurface is unknown, we need to create a Config via 
-            MRRTPlanner.CreateConfig
-            in order to specify isurface automatically.
-        """
-
-        def __init__(self, qrobot, tobj, qgrasp, configtype, isurface):
-
-            self.qrobot = qrobot
-            self.tobj = tobj
-            self.qgrasp = qgrasp
-            self.type = configtype
-            self.isurface = isurface
-
-            if (configtype == CP):
-                self.approachingdir = None
-            else:
-                self.approachingdir = qgrasp[1]
-
-
-        def __str__(self):
-            string = "configtype = {0}\n".format(DICTIONARY[WORDS[self.type]])
-            string += "qrobot = {0}\n".format(self.qrobot)
-            string += "tobj = {0}\n".format(self.tobj)
-            string += "qgrasp = {0}".format(self.qgrasp)
-            return string
-
-
-        def Clone(self):
-            qrobot = copy.copy(self.qrobot)
-            tobj = copy.copy(self.tobj)
-            qgrasp = copy.copy(self.qgrasp)
-            configtype = copy.copy(self.type)
-            isurface = copy.copy(self.isurface)
-            return  BaseManipulationPlanner.Config\
-            (qrobot, tobj, qgrasp, configtype, isurface)
-
-
-    #
-    # Vertex
-    #
-    class Vertex(object):
-        """
-        Class Vertex
-
-        Parameters
-        ----------
-        config : Config
-        parentindex : int
-            Index of its parent
-        vertextype : FW or BW
-            Indicates in which tree the vertex is
-        level : int
-            The number of levels from the root.
-            The root is at level 0.
-        trajtype : TRANSIT or TRANSFER
-        index : int
-            The index of this vertiex in tree.verticeslist.
-            This number will be assigned when added to a tree.
-        id : tuple
-            A vertex id is (pathlevel, isurface, approachingdir).
-            id has to contain pathlevel since now the graph will possibly 
-            have cycles.
-        """    
-
-        def __init__(self, config, vertextype=FW, trajtype=None, level=0):
-            self.config = config
-            self.parentindex = None
-            self.vertextype = vertextype
-            self.trajectory = None
-            self.level = level
-            self.trajtype = trajtype
-            self.index = 0 ## to be assigned when added to the tree
-            self.id = (self.level, self.config.isurface, self.config.approachingdir)
-
-
-        def __str__(self):
-            string = "vindex = {0}\n".format(self.index)
-            string += str(self.config)
-            return string
-
-
-        def Clone(self):
-            vnew = BaseManipulationPlanner.Vertex(self.config.Clone())
-
-            vnew.id = copy.deepcopy(self.id)
-
-            ## float and string are safe
-            vnew.parentindex = self.parentindex
-            vnew.vertextype = self.vertextype
-            vnew.trajectory = self.trajectory
-            vnew.level = self.level
-            vnew.trajtype = self.trajtype
-            vnew.index = self.index
-
-            return vnew
-
-
-    #
-    # Tree
-    #
-    class Tree(object):
-
-        def __init__(self, vroot, treetype=FW):
-            self.verticeslist = []
-            self.verticeslist.append(vroot)
-            self.treetype = treetype
-            self.length = 1
-
-
-        def __len__(self):
-            return len(self.verticeslist)
-
-
-        def __getitem__(self, index):
-            return self.verticeslist[index]
-
-
-        def Clone(self):
-            tnew = BaseManipulationPlanner.Tree(None, self.treetype)
-            tnew.verticeslist = [v.Clone() for v in self.verticeslist]
-            tnew.length = self.length
-            return tnew
-
-
-        def AddVertex(self, parentindex, vnew, trajectory, trajtype):
-            parent = self.verticeslist[parentindex]
-            vnew.parentindex = parentindex
-            # vnew.level = parent.level + 1
-            vnew.trajectory = trajectory
-            vnew.trajtype = trajtype
-            vnew.index = self.length
-            self.verticeslist.append(vnew)
-            self.length += 1
-
-
-        def GenerateManipulationTrajectory(self, vindex=-1):
-            trajslist = []
-            trajtypeslist = []
-            vertex = self.verticeslist[vindex]
-            while (vertex.parentindex != None):
-                parent = self.verticeslist[vertex.parentindex]
-                trajslist.append(vertex.trajectory)
-                trajtypeslist.append(vertex.trajtype)
-                vertex = parent
-
-            if (self.treetype == FW):
-                trajslist = trajslist[::-1]
-                trajtypeslist = trajtypeslist[::-1]
-
-            return [trajslist, trajtypeslist]
-
-
-        def GenerateObjectTransformationsList(self, vindex=-1):
-            tobjlist = []
-            vertex = self.verticeslist[vindex]
-            while (vertex.parentindex != None):
-                parent = self.verticeslist[vertex.parentindex]
-                tobjlist.append(vertex.config.tobj)
-                vertex = parent
-            tobjlist.append(self.verticeslist[0].config.tobj)
-
-            if (self.treetype == FW):
-                tobjlist = tobjlist[::-1]
-
-            return tobjlist
-   
     
-    #
-    # BaseManipulationPlanner initialization
-    #
     def __init__(self, robot, manipulatorname, mobj):
         self.robot = robot
         self.manip = self.robot.SetActiveManipulator(manipulatorname)
@@ -290,8 +287,7 @@ class BaseManipulationPlanner(object):
         self._amax = self.robot.GetDOFAccelerationLimits()[self.active_dofs]
         self._RNG = random.SystemRandom()
 
-        
-
+        # Parmaters
         self._print = True
         self._openravemaxiter = 1000 # max iterations for OpenRAVE planners
         self._shortcutiter = 300
@@ -303,7 +299,11 @@ class BaseManipulationPlanner(object):
         self._runningtime = 0.0
         self._iterations = 0
 
-        self.PreprocessObjectInfo()
+        # Create an object database
+        self.objectdb = od.LoadObjectDatabase(self.object.GetKinematicsGeometryHash())
+        if self.objectdb is None:
+            self.objectdb = od.ObjectDatabase(self.object)
+            od.SaveObjectDatabase(self.objectdb)
         
         
     @property
@@ -329,43 +329,6 @@ class BaseManipulationPlanner(object):
     @property
     def iterations(self):
         return self._iterations
-
-        
-    def PreprocessObjectInfo(self):
-        """
-        Stores information about object's placement & grasp classes
-        """
-        # S contains stable contact surfaces's transformation frame
-        # with respect to its COM (except S[0] which is the relative
-        # transformation between COM and the first link's frame). see
-        # ObjectPreprocess.py for more detail about S
-        self.S = op.PlacementPreprocess(self.object)
-
-        TCOM = np.array(self.S[0])
-        # The z-axis of each surface frame is pointing out of the
-        # object. However, what we need is a frame pointing into the
-        # object (so that the z-axis is aligned with that of the
-        # world).
-        Toffset = Utils.ComputeTRot(pX, np.pi)
-        # transformationset contains transformation T such that when
-        # assigning self.object.SetTransform(T), self.object is
-        # resting at a stable placement.
-        self.transformationset = [np.dot(Toffset, np.linalg.inv(np.dot(TCOM, T)))
-                                  for T in self.S[1:]]
-
-        if self._print:
-            print Colorize('Processing the object geometries', 'yellow')
-        self.boxinfos = []
-        for ibox in xrange(len(self.object.GetLinks())):
-            ts = time.time()
-            boxinfo = op.BoxInfo(self.object, ibox)
-            boxinfo.GetPossibleSlidingDirections()
-            boxinfo.Preprocess(self.transformationset)
-            te = time.time()
-            if self._print:
-                print Colorize('  box {0} took {1} sec.'.format(ibox, te - ts), 
-                               'yellow')
-            self.boxinfos.append(boxinfo)
             
             
     def CheckGrasp(self, qrobot, Tobj, holdobject=False):
@@ -409,7 +372,7 @@ class BaseManipulationPlanner(object):
             self.robot.SetActiveDOFValues(qrobot_ref)
             ibox = qgrasp[0]
             Tgripper = Utils.ComputeTGripper(self.object.GetLinks()[ibox].GetTransform(),
-                                             qgrasp, self.boxinfos[ibox].extents)
+                                             qgrasp, self.objectdb.boxinfos[ibox].extents)
             sol = self.manip.FindIKSolution(Tgripper, 
                                             orpy.IkFilterOptions.CheckEnvCollisions)
         if sol is None:
@@ -557,7 +520,7 @@ class BaseManipulationPlanner(object):
         if (qgrasp_goal is not None) and (qgoal is None):
             ibox = qgrasp_goal[0]
             graspedlink = self.object.GetLinks()[ibox]
-            extents = self.boxinfos[ibox].extents
+            extents = self.objectdb.boxinfos[ibox].extents
             Tgripper = Utils.ComputeTGripper(graspedlink.GetTransform(),
                                              qgrasp_goal, extents, unitscale=False)
             qgoal = self.manip.FindIKSolution\
@@ -627,7 +590,7 @@ class BaseManipulationPlanner(object):
         if (qgoal is None) and (Tgoal is not None):
             ibox = qgrasp[0]
             graspedlink = self.object.GetLinks()[ibox]
-            extents = self.boxinfos[ibox].extents
+            extents = self.objectdb.boxinfos[ibox].extents
             self.object.SetTransform(Tgoal)
             Tgripper = Utils.ComputeTGripper(graspedlink.GetTransform(),
                                              qgrasp, extents, unitscale=False)
