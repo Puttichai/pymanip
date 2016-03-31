@@ -28,6 +28,10 @@ from pylab import ion
 from mpl_toolkits.mplot3d import Axes3D
 ion()
 
+from os.path import expanduser, join
+_home = expanduser('~')
+_pymanipdir = join(_home, '.pymanip')
+
 # Global parameters
 TRANSIT = 0
 TRANSFER = 1
@@ -37,7 +41,7 @@ TRANSFER = 1
 ############################################################
 class GraspPlacementGraph(object):
     
-    def __init__(self, verticeslist=[], autogenerate=True):
+    def __init__(self, verticeslist=[], graphdict=None, autogenerate=True):
         """
         Parameters
         ----------
@@ -45,16 +49,26 @@ class GraspPlacementGraph(object):
             verticeslist is a list containing vertices.
             Each vertex is a pair (contactsurface, approachingdir).
             If a vertex is in CP, approachingdir is None.
+        graphdict : dictionary, optional
+            graphdict is a dictionary containing information of the
+            graph. In case the graph for the object has been created
+            before, we can load the saved graphdict and input it 
+            directly to initialize the graph.
         autogenerate : bool, optional
             autogenerate indicates whether or not to autogenerate 
             a graph dictionary.
         """
-        self.verticeslist = copy.copy(verticeslist)
-        self.graphdict = dict()
-        self.nvertices = len(self.verticeslist)
-        
-        if autogenerate:
-            self.GenerateGraphDictionary()
+        if graphdict is None:
+            self.verticeslist = copy.copy(verticeslist)
+            self.graphdict = dict()
+            self.nvertices = len(self.verticeslist)
+            if autogenerate:
+                self.GenerateGraphDictionary()
+        else:
+            # The GraspPlacementGraph dictionary is loaded from somewhere.
+            self.graphdict = copy.deepcopy(graphdict)
+            self.verticeslist = graphdict.keys()
+            self.nvertices = len(self.verticeslist)
 
 
     def __getitem__(self, key):
@@ -415,3 +429,25 @@ def CreateBWDirectedGraphFromPathsList(pathslist):
                 Gnew.verticeslist.append(prevkey)
                 
     return Gnew
+
+
+def SaveGraphDict(graphdict, objecthash, graphtype='gpg', path=_pymanipdir):
+    import pickle
+    filename = join(path, objecthash + '.' + graphtype + '.graphdict.pkl')
+    with open(filename, 'wb') as f:
+        pickle.dump(graphdict, f, pickle.HIGHEST_PROTOCOL)
+    print 'The graphdict has been successfully saved to {0}'.format(filename)
+
+
+def LoadGraphDict(objecthash, graphtype='gpg', path=_pymanipdir):
+    import pickle
+    filename = join(path, objecthash + '.' + graphtype + '.graphdict.pkl')
+    try:
+        with open(filename, 'rb') as f:
+            graphdict = pickle.load(f)
+        print 'The graphdict has been successfully loaded from {0}'.format(filename)
+    except:
+        print 'Something is wrong while loading the graphdict.'
+        print 'Check the information again'
+        graphdict = None
+    return graphdict
