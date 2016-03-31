@@ -191,9 +191,10 @@ class BoxInfo(object):
         self.env.SetCollisionChecker(self.collisionchecker)
         
         ## remove all other body
-        for kinbody in self.env.GetBodies():
-            if not (kinbody.GetName() == self.objectname):
-                self.env.Remove(kinbody)
+        with self.env:
+            for kinbody in self.env.GetBodies():
+                if not (kinbody.GetName() == self.objectname):
+                    self.env.Remove(kinbody)
         assert(len(self.env.GetBodies()) == 1)
 
         self.object = self.env.GetKinBody(self.objectname)
@@ -201,7 +202,8 @@ class BoxInfo(object):
 
         ## load the gripper
         self.gripper = self.env.ReadKinBodyXMLData(gripper_aabb)
-        self.env.Add(self.gripper)
+        with self.env:
+            self.env.Add(self.gripper)
         
         ## create a floor for testing
         floor = orpy.RaveCreateKinBody(self.env, '')
@@ -209,7 +211,8 @@ class BoxInfo(object):
         for geom in floor.GetLinks()[0].GetGeometries():
             geom.SetDiffuseColor(np.array([0.6, 0.6, 0.6]))
         floor.SetName('floor')
-        self.env.Add(floor)
+        with self.env:
+            self.env.Add(floor)
         Tfloor = np.eye(4)
         Tfloor[2][3] -= 0.050001
         floor.SetTransform(Tfloor)
@@ -514,3 +517,15 @@ class BoxInfo(object):
         
         return np.around(interval, decimals = 6).tolist()
 
+
+    def DestroyOpenRAVEObjects(self):
+        """
+        Destroy all OpenRAVE objects to enable saving using pickle.
+        """
+        self.env.Destroy()
+        del self.object
+        del self.link
+        del self.gripper
+        del self.collisionchecker
+        del self.env
+        
